@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import API_BASE_URL from "../utils/apiConfig";
+import API_BASE_URL, { SERVER_URL } from "../utils/apiConfig";
 import { useTheme } from "../context/ThemeContext";
 import { 
   Mail, 
@@ -393,24 +393,35 @@ export default function CodingProfile() {
   const fetchGfgStats = async (username) => {
     try {
       setGfgError(false);
+
+      // Strategy 1: Use our own backend GFG scraper (most reliable, no CORS issues)
       try {
-        // Using an unofficial geeksforgeeks API wrapper
-        const response = await axios.get(`https://geeks-for-geeks-api.vercel.app/${username}`, { timeout: 8000 });
-        if (!response.data || Object.keys(response.data).length === 0 || response.data.error) {
-          throw new Error("Invalid username");
+        const response = await axios.get(`${API_BASE_URL}/gfg/${username}`, { timeout: 15000 });
+        if (response.data && !response.data.error) {
+          setGfgStats(response.data);
+          return;
         }
-        setGfgStats(response.data);
-      } catch (primaryError) {
-        console.warn("Primary GeeksForGeeks API failed, trying secondary...", primaryError.message);
-        // Fallback to secondary API
-        const response2 = await axios.get(`https://gfg-api.tashif.codes/api/user/${username}`, { timeout: 8000 });
-        if (!response2.data || Object.keys(response2.data).length === 0 || response2.data.error || response2.data.status !== 'success') {
-          throw new Error("Invalid username on secondary API");
-        }
-        setGfgStats(response2.data);
+        throw new Error("Backend GFG returned error");
+      } catch (backendError) {
+        console.warn("Backend GFG API failed, trying third-party...", backendError.message);
       }
+
+      // Strategy 2: Try the third-party unofficial APIs as fallback
+      try {
+        const response = await axios.get(`https://geeks-for-geeks-api.vercel.app/${username}`, { timeout: 8000 });
+        if (response.data && Object.keys(response.data).length > 0 && !response.data.error) {
+          setGfgStats(response.data);
+          return;
+        }
+        throw new Error("Third-party GFG API returned error");
+      } catch (fallbackError) {
+        console.warn("Third-party GFG API also failed:", fallbackError.message);
+      }
+
+      // All strategies failed
+      throw new Error("All GFG APIs failed");
     } catch (error) {
-      console.error("GeeksForGeeks API failed:", error.message);
+      console.error("GeeksForGeeks stats fetch failed:", error.message);
       setGfgStats(null);
       setGfgError(true);
     }
@@ -561,6 +572,12 @@ export default function CodingProfile() {
   // Generate fallback avatar based on user's name
   const fallbackAvatar = `https://ui-avatars.com/api/?name=${profileData.firstName}+${profileData.lastName}&background=random`;
 
+  const getProfilePicUrl = (pic) => {
+    if (!pic) return fallbackAvatar;
+    if (pic.startsWith('http')) return pic;
+    return `${SERVER_URL}${pic}`;
+  };
+
   const renderProfileDetailsTab = () => (
     <div className="space-y-8 animate-fadeIn">
       {/* Profile Photo & Summary Section */}
@@ -610,7 +627,7 @@ export default function CodingProfile() {
                  <div className="flex flex-col sm:flex-row items-center gap-6">
                    <div className="w-20 h-20 rounded-full border-4 border-white dark:border-[#181824] shadow-lg overflow-hidden bg-gray-100 dark:bg-white/5 flex-shrink-0">
                      <img 
-                       src={editForm?.profilePic || profileData.profilePic || fallbackAvatar} 
+                       src={getProfilePicUrl(editForm?.profilePic || profileData.profilePic)} 
                        alt="Profile Preview" 
                        className="w-full h-full object-cover"
                      />
@@ -2044,7 +2061,7 @@ export default function CodingProfile() {
          <div className="w-8 h-4 bg-emerald-500 rounded-full relative"><div className="absolute right-0.5 top-0.5 w-3 h-3 bg-white rounded-full"></div></div>
       </div>
       <div className="relative w-28 h-28 rounded-full p-1 border-2 border-indigo-500/50 mb-4 overflow-hidden">
-        <img src={profileData.profilePic || fallbackAvatar} alt="Profile" className="w-full h-full rounded-full object-cover" onError={(e) => { e.target.src = fallbackAvatar; }}/>
+        <img src={getProfilePicUrl(profileData.profilePic)} alt="Profile" className="w-full h-full rounded-full object-cover" onError={(e) => { e.target.src = fallbackAvatar; }}/>
       </div>
       <h2 className={`text-xl font-bold tracking-tight mb-1 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{profileData.firstName || profileData.lastName ? `${profileData.firstName} ${profileData.lastName}` : profileData.username || 'User'}</h2>
       <p className="text-sm font-medium text-emerald-500 mb-4 flex items-center gap-1">@{profileData.username} <Check size={14} className="bg-emerald-500 text-white rounded-full p-0.5"/></p>
